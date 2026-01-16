@@ -40,6 +40,7 @@ The content is organized as follows:
 </file_summary>
 
 <directory_structure>
+.env.example
 package.json
 src/main/main.ts
 src/main/preload.ts
@@ -53,6 +54,7 @@ src/renderer/components/Settings/SettingsPanel.tsx
 src/renderer/hooks/useChat.ts
 src/renderer/hooks/useGameDetection.ts
 src/renderer/index.tsx
+src/renderer/services/localStorage.service.ts
 src/renderer/services/roblox.service.ts
 src/renderer/services/socket.service.ts
 src/renderer/styles/App.css
@@ -66,6 +68,12 @@ webpack.config.js
 <files>
 This section contains the contents of the repository's files.
 
+<file path=".env.example">
+REACT_APP_API_URL=
+REACT_APP_SOCKET_URL=
+CLIENT_REDIRECT_URL=
+</file>
+
 <file path="package.json">
 {
   "name": "roblox-chat-overlay",
@@ -74,21 +82,28 @@ This section contains the contents of the repository's files.
   "scripts": {
     "dev": "webpack serve --mode development",
     "build": "webpack --mode production",
+    "build:main": "tsc -p tsconfig.main.json",
     "electron": "electron .",
-    "start": "npm run build && npm run electron"
+    "start": "npm run build && npm run build:main && npm run electron",
+      "dev:all": "npm run dev & npm run build:main && npm run electron"
+
   },
   "dependencies": {
     "axios": "^1.6.0",
     "buffer": "^6.0.3",
     "electron": "^28.0.0",
     "events": "^3.3.0",
+    "lodash": "^4.17.21",
     "process": "^0.11.10",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "socket.io-client": "^4.6.1"
+    "react-window": "^2.2.5",
+    "socket.io-client": "^4.6.1",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
-    "@types/node": "^18.19.0",
+    "@types/node": "^18.19.130",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "css-loader": "^6.8.1",
@@ -105,16 +120,54 @@ This section contains the contents of the repository's files.
 </file>
 
 <file path="src/main/main.ts">
-import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut, session, shell, Event, IpcMainEvent } from 'electron';
 import * as path from 'path';
+import * as winston from 'winston';
+import 'winston-daily-rotate-file';
+import { exec } from 'child_process';
+// ADD THIS AT THE VERY TOP OF THE FILE
+console.log('🚨 main.ts IS LOADING! Test 1-2-3');
+console.log('Current dir:', __dirname);
+// ========== WINSTON LOGGER SETUP ==========
+const logFormat = winston.format.combine(
+  winston.format.timestamp(),
+  winston.format.errors({ stack: true }),
+  winston.format.json()
+);
+
+const logger = winston.createLogger({
+  level: 'debug',
+  format: logFormat,
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.printf(({ timestamp, level, message, ...meta }) => {
+          const metaStr = Object.keys(meta).length ? JSON.stringify(meta) : '';
+          return `${timestamp} [${level}]: ${message} ${metaStr}`.trim();
+        })
+      )
+    }),
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/main-process-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxSize: '20m',
+      maxFiles: '14d',
+      format: logFormat
+    })
+  ]
+});
+
+logger.info('Main process starting...');
 
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
+  logger.info('Creating main browser window...');
   mainWindow = new BrowserWindow({
-    width: 350,  // Smaller width
-    height: 550, // Smaller height
-    frame: false,  // No frame
+    width: 350,
+    height: 550,
+    frame: false,
     transparent: true,
     alwaysOnTop: false,
     resizable: true,
@@ -125,27 +178,131 @@ function createWindow() {
     },
   });
 
+  const mainSession = mainWindow.webContents.session;
+  mainSession.setCertificateVerifyProc((request, callback) => {
+    callback(0);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (event: Event, errorCode: number, errorDescription: string) => {
+    logger.error('Window failed to load', { errorCode, errorDescription });
+  });
+
+  // ========== FIX FOR EXTERNAL LINKS ==========
+  mainWindow.webContents.setWindowOpenHandler(({ url, frameName, features, disposition }) => {
+    const currentUrl = mainWindow?.webContents.getURL() || 'unknown';
+    logger.info('====== WINDOW OPEN HANDLER TRIGGERED ======', {
+      url,
+      frameName,
+      features,
+      disposition,
+      referrer: currentUrl
+    });
+
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      logger.info('Opening external URL in default browser', { url });
+      
+      try {
+        const opened = shell.openExternal(url);
+        logger.info('shell.openExternal result', { success: opened, url });
+        
+        if (!opened) {
+          logger.error('shell.openExternal returned false - link may not have opened');
+          
+          // Alternative method using child process
+          const command = process.platform === 'win32' 
+            ? `start "" "${url}"`
+            : process.platform === 'darwin'
+              ? `open "${url}"`
+              : `xdg-open "${url}"`;
+          
+          exec(command, (error: any) => {
+            if (error) {
+              logger.error('Alternative exec method also failed', { error: error.message });
+            } else {
+              logger.info('Alternative exec method succeeded');
+            }
+          });
+        }
+      } catch (error: any) {
+        logger.error('shell.openExternal failed with exception', { 
+          error: error.message, 
+          stack: error.stack 
+        });
+      }
+      
+      return { action: 'deny' };
+    }
+    
+    logger.info('Allowing non-http URL to open in Electron', { url });
+    return { action: 'allow' };
+  });
+
+  // ========== EXTRA SAFETY: CATCH ALL NAVIGATION ==========
+  mainWindow.webContents.on('will-navigate', (event: Event, url: string) => {
+    logger.info('will-navigate event triggered', { url, currentUrl: mainWindow?.webContents.getURL() });
+    
+    if (!url.startsWith('http://localhost:3000') && 
+        !url.startsWith('file://') && 
+        (url.startsWith('http://') || url.startsWith('https://'))) {
+      logger.info('Blocking external navigation, opening in default browser instead', { url });
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
   mainWindow.loadURL('http://localhost:3000');
-  // Remove this line to hide DevTools by default:
-  // mainWindow.webContents.openDevTools();
+  mainWindow.webContents.openDevTools();
+  logger.info('Main window loaded and DevTools opened.');
 
   mainWindow.on('closed', () => {
+    logger.info('Main window closed.');
     mainWindow = null;
   });
 }
 
 app.whenReady().then(() => {
+  logger.info('Electron app is ready.');
   createWindow();
 
+  // Test from main process (should always work)
+  setTimeout(() => {
+    logger.info('MAIN PROCESS TEST: Opening Google in default browser...');
+    try {
+      const success = shell.openExternal('https://google.com');
+      logger.info('Main process test result', { success });
+      
+      if (!success) {
+        logger.error('Main process test failed - shell.openExternal returned false');
+        
+        // Try alternative for Windows
+        if (process.platform === 'win32') {
+          exec(`start "" "https://google.com"`, (error: any) => {
+            if (error) {
+              logger.error('Windows exec alternative also failed', { error: error.message });
+            } else {
+              logger.info('Windows exec alternative succeeded');
+            }
+          });
+        }
+      }
+    } catch (error: any) {
+      logger.error('Main process test exception', { error: error.message });
+    }
+  }, 3000);
+
+  // Shortcut for toggling window
   globalShortcut.register('CommandOrControl+Shift+C', () => {
     if (mainWindow) {
       if (mainWindow.isVisible()) {
         mainWindow.hide();
+        logger.debug('Window hidden via global shortcut.');
       } else {
         mainWindow.show();
+        logger.debug('Window shown via global shortcut.');
       }
     }
   });
+  logger.info('Global shortcut Ctrl+Shift+C registered.');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -155,56 +312,86 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  logger.info('All windows closed. Quitting app.');
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('will-quit', () => {
+  logger.info('App will quit. Unregistering shortcuts.');
   globalShortcut.unregisterAll();
 });
 
-// IPC handlers
-ipcMain.on('set-always-on-top', (event, flag: boolean) => {
-  if (mainWindow) {
-    mainWindow.setAlwaysOnTop(flag);
-  }
+// ========== IPC HANDLERS ==========
+ipcMain.on('set-always-on-top', (event: IpcMainEvent, flag: boolean) => {
+  logger.debug('IPC: set-always-on-top', { flag });
+  if (mainWindow) mainWindow.setAlwaysOnTop(flag);
 });
 
-ipcMain.on('set-opacity', (event, opacity: number) => {
-  if (mainWindow) {
-    mainWindow.setOpacity(opacity);
-  }
+ipcMain.on('set-opacity', (event: IpcMainEvent, opacity: number) => {
+  logger.debug('IPC: set-opacity', { opacity });
+  if (mainWindow) mainWindow.setOpacity(opacity);
 });
 
 ipcMain.on('minimize', () => {
-  if (mainWindow) {
-    mainWindow.minimize();
-  }
+  logger.debug('IPC: minimize');
+  if (mainWindow) mainWindow.minimize();
 });
 
 ipcMain.on('close', () => {
-  if (mainWindow) {
-    mainWindow.close();
-  }
+  logger.debug('IPC: close');
+  if (mainWindow) mainWindow.close();
 });
-ipcMain.on('resize-to', (event, width: number, height: number) => {
-  if (mainWindow) {
-    mainWindow.setSize(width, height);
-  }
+
+ipcMain.on('resize-to', (event: IpcMainEvent, width: number, height: number) => {
+  logger.debug('IPC: resize-to', { width, height });
+  if (mainWindow) mainWindow.setSize(width, height);
+});
+
+ipcMain.on('open-external', (event: IpcMainEvent, url: string) => {
+  logger.info('IPC: open-external received from renderer', { url });
+  shell.openExternal(url);
+});
+
+// ========== ADDITIONAL HANDLERS FOR DEBUGGING ==========
+ipcMain.on('log-debug', (event: IpcMainEvent, message: string, data: any) => {
+  logger.debug(`Renderer: ${message}`, data);
+});
+
+ipcMain.on('log-info', (event: IpcMainEvent, message: string, data: any) => {
+  logger.info(`Renderer: ${message}`, data);
+});
+
+ipcMain.on('log-error', (event: IpcMainEvent, message: string, error: any) => {
+  logger.error(`Renderer: ${message}`, { error });
+});
+
+// Test if renderer can communicate
+ipcMain.on('ping', (event: IpcMainEvent) => {
+  logger.info('Ping received from renderer');
+  event.reply('pong', { timestamp: Date.now() });
 });
 </file>
 
 <file path="src/main/preload.ts">
+// frontend/src/main/preload.ts
 import { contextBridge, ipcRenderer } from 'electron';
 
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('electron', {
+  // Window controls
   setAlwaysOnTop: (flag: boolean) => ipcRenderer.send('set-always-on-top', flag),
   setOpacity: (opacity: number) => ipcRenderer.send('set-opacity', opacity),
   minimize: () => ipcRenderer.send('minimize'),
   close: () => ipcRenderer.send('close'),
   resizeTo: (width: number, height: number) => ipcRenderer.send('resize-to', width, height),
+
+  // External links: ALWAYS go through the main process
+  openExternal: (url: string) => {
+    console.log('[Renderer Preload] Sending URL to main process:', url);
+    ipcRenderer.send('open-external', url);
+  },
 });
 </file>
 
@@ -256,7 +443,8 @@ import { Settings, User } from './types/index';
 import './styles/App.css';
 
 const App: React.FC = () => {
-  const [token, setToken] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -270,38 +458,75 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const tokenFromUrl = urlParams.get('token');
+    const accessTokenFromUrl = urlParams.get('accessToken');
+    const refreshTokenFromUrl = urlParams.get('refreshToken');
 
-    if (tokenFromUrl) {
-      setToken(tokenFromUrl);
-      localStorage.setItem('roblox_chat_token', tokenFromUrl);
+    if (accessTokenFromUrl && refreshTokenFromUrl) {
+      setAccessToken(accessTokenFromUrl);
+      setRefreshToken(refreshTokenFromUrl);
+      localStorage.setItem('roblox_chat_access_token', accessTokenFromUrl);
+      localStorage.setItem('roblox_chat_refresh_token', refreshTokenFromUrl);
       window.history.replaceState({}, document.title, '/');
     } else {
-      const savedToken = localStorage.getItem('roblox_chat_token');
-      if (savedToken) {
-        setToken(savedToken);
+      const savedAccessToken = localStorage.getItem('roblox_chat_access_token');
+      const savedRefreshToken = localStorage.getItem('roblox_chat_refresh_token');
+      if (savedAccessToken) {
+        setAccessToken(savedAccessToken);
+        setRefreshToken(savedRefreshToken);
       }
     }
   }, []);
 
   useEffect(() => {
     const verifyToken = async () => {
-      if (!token) return;
+      if (!accessToken) return;
 
-      const userData = await RobloxService.verifyToken(token);
+      const userData = await RobloxService.verifyToken(accessToken);
       if (userData) {
         setUser(userData);
       } else {
-        setToken(null);
-        localStorage.removeItem('roblox_chat_token');
+        // Try to refresh the token
+        if (refreshToken) {
+          try {
+            const response = await fetch('http://localhost:3001/auth/refresh', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refreshToken })
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              setAccessToken(data.accessToken);
+              localStorage.setItem('roblox_chat_access_token', data.accessToken);
+            } else {
+              // Both tokens are invalid, logout
+              setAccessToken(null);
+              setRefreshToken(null);
+              localStorage.removeItem('roblox_chat_access_token');
+              localStorage.removeItem('roblox_chat_refresh_token');
+            }
+          } catch (error) {
+            // Logout on error
+            setAccessToken(null);
+            setRefreshToken(null);
+            localStorage.removeItem('roblox_chat_access_token');
+            localStorage.removeItem('roblox_chat_refresh_token');
+          }
+        } else {
+          // No refresh token, logout
+          setAccessToken(null);
+          setRefreshToken(null);
+          localStorage.removeItem('roblox_chat_access_token');
+          localStorage.removeItem('roblox_chat_refresh_token');
+        }
       }
     };
 
     verifyToken();
-  }, [token]);
+  }, [accessToken, refreshToken]);
 
-  const { presence, currentRoom } = useGameDetection(token);
-  const { messages, sendMessage } = useChat(currentRoom, token);
+  const { presence, currentRoom } = useGameDetection(accessToken);
+  const { messages, sendMessage } = useChat(currentRoom, accessToken);
 
   useEffect(() => {
     if (window.electron) {
@@ -309,6 +534,17 @@ const App: React.FC = () => {
       window.electron.setOpacity(settings.opacity);
     }
   }, [settings.alwaysOnTop, settings.opacity]);
+
+  // Resize window when minimized/expanded
+  useEffect(() => {
+    if (window.electron && window.electron.resizeTo) {
+      if (isMinimized) {
+        window.electron.resizeTo(340, 65);
+      } else {
+        window.electron.resizeTo(350, 550);
+      }
+    }
+  }, [isMinimized]);
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -319,22 +555,12 @@ const App: React.FC = () => {
         setShowSettings(!showSettings);
       }
     };
-  useEffect(() => {
-  if (window.electron) {
-    if (isMinimized) {
-      // Small window when minimized
-      window.resizeTo(340, 65);
-    } else {
-      // Normal window when expanded
-      window.resizeTo(350, 550);
-    }
-  }
-}, [isMinimized]);
+
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isMinimized, showSettings]);
 
-  if (!token || !user) {
+  if (!accessToken || !user) {
     return <LoginScreen />;
   }
 
@@ -350,7 +576,6 @@ const App: React.FC = () => {
         opacity={settings.opacity}
       />
 
-      {/* Only show these when NOT minimized */}
       {!isMinimized && (
         <>
           <button onClick={() => setShowSettings(true)} style={styles.settingsButton}>
@@ -429,10 +654,32 @@ import React from 'react';
 import { RobloxService } from '../../services/roblox.service';
 
 const LoginScreen: React.FC = () => {
-  const handleLogin = () => {
-    const authUrl = RobloxService.getAuthUrl();
-    // Change from window.open to window.location
-    window.location.href = authUrl;
+ const handleLogin = () => {
+  const authUrl = RobloxService.getAuthUrl();
+  
+  // Use Electron's shell module via the preload bridge
+  if (window.electron && window.electron.openExternal) {
+    window.electron.openExternal(authUrl); // This will use shell.openExternal
+  } else {
+    // Fallback for web version (though your app is Electron)
+    console.error('Electron API not available');
+  }
+};
+
+  // NEW: Test function to open URL in default browser
+  const testOpenExternal = () => {
+    const testUrl = 'https://google.com';
+    console.log('Testing external browser open with URL:', testUrl);
+    
+    // Use Electron's openExternal if available
+    if (window.electron && window.electron.openExternal) {
+      console.log('Using electron.openExternal');
+      window.electron.openExternal(testUrl);
+    } else {
+      console.warn('Electron API not available. Test would fall back to window.open');
+      // Fallback for testing in non-Electron environment
+      window.open(testUrl, '_blank');
+    }
   };
 
   return (
@@ -440,11 +687,26 @@ const LoginScreen: React.FC = () => {
       <div style={styles.card}>
         <h1 style={styles.title}>🎮 Roblox Chat Overlay</h1>
         <p style={styles.subtitle}>Connect with players across servers!</p>
+        
+        {/* Main Login Button (Red) */}
         <button style={styles.button} onClick={handleLogin}>
           🔐 Login with Roblox
         </button>
+        
+        {/* NEW: Test Button (Green) */}
+        <button 
+          style={styles.testButton} 
+          onClick={testOpenExternal}
+          title="Test if opening in default browser works"
+        >
+          🧪 Test: Open Google in Browser
+        </button>
+        
         <p style={styles.info}>
           You'll be redirected to Roblox to authorize.
+        </p>
+        <p style={styles.testInfo}>
+          <small>Use the green test button first to verify external browser functionality</small>
         </p>
       </div>
     </div>
@@ -487,11 +749,34 @@ const styles: { [key: string]: React.CSSProperties } = {
     cursor: 'pointer',
     fontWeight: 'bold',
     transition: 'transform 0.2s',
+    marginBottom: '15px', // Added spacing for test button
+    width: '100%',
+  },
+  // NEW: Test button style
+  testButton: {
+    background: '#2ecc71',
+    color: 'white',
+    border: 'none',
+    padding: '10px 20px',
+    fontSize: '14px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    transition: 'transform 0.2s',
+    width: '100%',
+    marginBottom: '15px',
   },
   info: {
     marginTop: '20px',
     fontSize: '12px',
     color: '#999',
+  },
+  // NEW: Test info style
+  testInfo: {
+    marginTop: '10px',
+    fontSize: '11px',
+    color: '#666',
+    fontStyle: 'italic',
   },
 };
 
@@ -526,8 +811,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const handleClose = () => {
     if (window.electron) {
       window.electron.close();
-    } else {
-      window.close();
     }
   };
 
@@ -1027,13 +1310,48 @@ export default SettingsPanel;
 </file>
 
 <file path="src/renderer/hooks/useChat.ts">
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import socketService from '../services/socket.service';
+import { LocalStorageService } from '../services/localStorage.service';
 import { Message } from '../types/index';
 
 export const useChat = (roomId: string | null, token: string | null) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const messageQueue = useRef<Message[]>([]);
+  const processing = useRef(false);
+  const messagesRef = useRef<Message[]>([]);
+
+  // Update ref when messages change
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Batch message updates for better performance
+  const processMessageQueue = useCallback(() => {
+    if (messageQueue.current.length === 0 || processing.current) return;
+    
+    processing.current = true;
+    
+    requestAnimationFrame(() => {
+      setMessages(prev => {
+        const newMessages = [...prev, ...messageQueue.current];
+        // Keep only last 200 messages to prevent memory issues
+        if (newMessages.length > 200) {
+          return newMessages.slice(-200);
+        }
+        return newMessages;
+      });
+      
+      messageQueue.current = [];
+      processing.current = false;
+    });
+  }, []);
+
+  // Clear old messages on mount
+  useEffect(() => {
+    LocalStorageService.clearOldMessages();
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -1045,10 +1363,28 @@ export const useChat = (roomId: string | null, token: string | null) => {
     // Setup listeners
     socketService.onRoomHistory((msgs) => {
       setMessages(msgs);
+      if (roomId) {
+        LocalStorageService.saveMessages(roomId, msgs);
+      }
     });
 
     socketService.onNewMessage((msg) => {
-      setMessages((prev) => [...prev, msg]);
+      messageQueue.current.push(msg);
+      processMessageQueue();
+      
+      // Update local storage
+      if (roomId) {
+        const updatedMessages = [...messagesRef.current, msg];
+        if (updatedMessages.length > 200) {
+          updatedMessages.slice(-200);
+        }
+        LocalStorageService.saveMessages(roomId, updatedMessages);
+      }
+    });
+
+    socketService.onMessageBlocked((data) => {
+      console.log('Message blocked:', data);
+      // You could show a notification to the user here
     });
 
     socketService.onUserJoined((data) => {
@@ -1063,13 +1399,17 @@ export const useChat = (roomId: string | null, token: string | null) => {
       socketService.disconnect();
       setIsConnected(false);
     };
-  }, [token]);
+  }, [token, processMessageQueue]);
 
   useEffect(() => {
     if (!roomId || !isConnected) {
       setMessages([]);
       return;
     }
+
+    // Load messages from local storage while waiting for server
+    const cachedMessages = LocalStorageService.getMessages(roomId);
+    setMessages(cachedMessages);
 
     // Join new room
     socketService.joinRoom(roomId);
@@ -1160,6 +1500,62 @@ root.render(
     <App />
   </React.StrictMode>
 );
+</file>
+
+<file path="src/renderer/services/localStorage.service.ts">
+import { Message } from '../types/index';
+
+export const LocalStorageService = {
+  saveMessages(roomId: string, messages: Message[]) {
+    try {
+      const key = `chat_${roomId}`;
+      localStorage.setItem(key, JSON.stringify({
+        messages,
+        timestamp: Date.now()
+      }));
+    } catch (error) {
+      console.error('Failed to save messages:', error);
+    }
+  },
+  
+  getMessages(roomId: string): Message[] {
+    try {
+      const key = `chat_${roomId}`;
+      const data = localStorage.getItem(key);
+      
+      if (data) {
+        const parsed = JSON.parse(data);
+        // Return only messages from last 24 hours
+        if (Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
+          return parsed.messages;
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    }
+    
+    return [];
+  },
+  
+  clearOldMessages() {
+    // Cleanup old messages
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('chat_')) {
+        try {
+          const data = localStorage.getItem(key);
+          if (data) {
+            const parsed = JSON.parse(data);
+            if (Date.now() - parsed.timestamp > 24 * 60 * 60 * 1000) {
+              localStorage.removeItem(key);
+            }
+          }
+        } catch (error) {
+          localStorage.removeItem(key);
+        }
+      }
+    });
+  }
+};
 </file>
 
 <file path="src/renderer/services/roblox.service.ts">
@@ -1291,6 +1687,12 @@ class SocketService {
     if (this.socket) {
       this.socket.removeAllListeners();
     }
+    
+  }
+    onMessageBlocked(callback: (data: { reason: string; flaggedWords?: string[] }) => void) {
+    if (this.socket) {
+      this.socket.on('message-blocked', callback);
+    }
   }
 }
 
@@ -1306,7 +1708,7 @@ export default new SocketService();
 
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: transparent; /* Fully transparent */
+  background: transparent;
   overflow: hidden;
 }
 
@@ -1314,7 +1716,7 @@ body {
   width: 100vw;
   height: 100vh;
   position: relative;
-  background: transparent; /* Fully transparent */
+  background: transparent;
 }
 
 button {
@@ -1366,6 +1768,7 @@ declare global {
       minimize: () => void;
       close: () => void;
       resizeTo: (width: number, height: number) => void;
+      openExternal: (url: string) => void; // Add this line
     };
   }
 }
@@ -1420,7 +1823,7 @@ export interface Settings {
     "resolveJsonModule": true,
     "moduleResolution": "node"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/renderer/services/localStorage.service.ts"],
   "exclude": ["node_modules"]
 }
 </file>

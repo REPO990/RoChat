@@ -2,12 +2,16 @@
   "name": "roblox-chat-overlay",
   "version": "1.0.0",
   "main": "dist/main/main.js",
+  
   "scripts": {
     "dev": "webpack serve --mode development",
     "build": "webpack --mode production",
+    "build:main": "tsc -p tsconfig.main.json",
     "electron": "electron .",
-    "start": "npm run build && npm run electron"
+    "start": "npm run build && npm run build:main && npm run electron",
+    "dev:full": "npm run dev & npm run build:main && npm run electron"
   },
+
   "dependencies": {
     "axios": "^1.6.0",
     "buffer": "^6.0.3",
@@ -18,10 +22,12 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-window": "^2.2.5",
-    "socket.io-client": "^4.6.1"
+    "socket.io-client": "^4.6.1",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
-    "@types/node": "^18.19.0",
+    "@types/node": "^18.19.130",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "css-loader": "^6.8.1",

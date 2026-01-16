@@ -22,6 +22,21 @@ const App: React.FC = () => {
     isDraggable: true,
   });
 
+  // ========== ADD THIS NEW useEffect ==========
+  useEffect(() => {
+    // Listen for OAuth callback from Electron
+    if (window.electron && window.electron.onOAuthCallback) {
+      window.electron.onOAuthCallback(({ accessToken, refreshToken }) => {
+        console.log('🎯 OAuth callback received in React app');
+        setAccessToken(accessToken);
+        setRefreshToken(refreshToken);
+        localStorage.setItem('roblox_chat_access_token', accessToken);
+        localStorage.setItem('roblox_chat_refresh_token', refreshToken);
+      });
+    }
+  }, []);
+  // ========== END OF NEW CODE ==========
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const accessTokenFromUrl = urlParams.get('accessToken');

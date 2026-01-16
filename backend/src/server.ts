@@ -7,8 +7,7 @@ import { initDatabase } from './config/database';
 import { initializeSocket } from './services/socket.service';
 import authRoutes from './routes/auth.routes';
 import chatRoutes from './routes/chat.routes';
-import { authLimiter, apiLimiter } from './middleware/rateLimiter';
-import helmet from 'helmet';
+import { logger } from './utils/logger';
 
 dotenv.config();
 
@@ -24,6 +23,12 @@ const io = new Server(httpServer, {
 
 const PORT = process.env.PORT || 3001;
 
+// Log incoming requests
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url}`);
+  next();
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -32,14 +37,20 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/auth', authRoutes);
 app.use('/chat', chatRoutes);
-app.get('/debug-auth', (req, res) => {
-  console.log('Debug route hit!');
-  res.send('Auth router is working.');
-});
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Error handling middleware
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  logger.error('Unhandled error', {
+    error: err.message,
+    path: req.path,
+    method: req.method
+  });
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Initialize Socket.IO
@@ -48,15 +59,28 @@ initializeSocket(io);
 // Start server
 const startServer = async () => {
   try {
+    logger.info('Starting server initialization...');
+    
     // Initialize database
     await initDatabase();
+    logger.info('Database initialized successfully');
 
     httpServer.listen(PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${PORT}`);
-      console.log(`🔌 Socket.IO ready`);
+      logger.info(`🚀 Server running on http://localhost:${PORT}`);
+      logger.info(`🔌 Socket.IO ready`);
     });
-  } catch (error) {
-    console.error('Failed to start server:', error);
+
+    // Graceful shutdown
+    process.on('SIGTERM', () => {
+      logger.info('SIGTERM received. Shutting down gracefully...');
+      httpServer.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+      });
+    });
+
+  } catch (error: any) {
+    logger.error('Failed to start server:', error);
     process.exit(1);
   }
 };

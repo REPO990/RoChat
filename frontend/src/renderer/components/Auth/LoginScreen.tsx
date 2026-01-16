@@ -2,31 +2,11 @@ import React from 'react';
 import { RobloxService } from '../../services/roblox.service';
 
 const LoginScreen: React.FC = () => {
- const handleLogin = () => {
-  const authUrl = RobloxService.getAuthUrl();
-  
-  // Use Electron's shell module via the preload bridge
-  if (window.electron && window.electron.openExternal) {
-    window.electron.openExternal(authUrl); // This will use shell.openExternal
-  } else {
-    // Fallback for web version (though your app is Electron)
-    console.error('Electron API not available');
-  }
-};
-
-  // NEW: Test function to open URL in default browser
-  const testOpenExternal = () => {
-    const testUrl = 'https://google.com';
-    console.log('Testing external browser open with URL:', testUrl);
+  const handleLogin = () => {
+    const authUrl = RobloxService.getAuthUrl();
     
-    // Use Electron's openExternal if available
     if (window.electron && window.electron.openExternal) {
-      console.log('Using electron.openExternal');
-      window.electron.openExternal(testUrl);
-    } else {
-      console.warn('Electron API not available. Test would fall back to window.open');
-      // Fallback for testing in non-Electron environment
-      window.open(testUrl, '_blank');
+      window.electron.openExternal(authUrl);
     }
   };
 
@@ -36,25 +16,12 @@ const LoginScreen: React.FC = () => {
         <h1 style={styles.title}>🎮 Roblox Chat Overlay</h1>
         <p style={styles.subtitle}>Connect with players across servers!</p>
         
-        {/* Main Login Button (Red) */}
         <button style={styles.button} onClick={handleLogin}>
           🔐 Login with Roblox
         </button>
         
-        {/* NEW: Test Button (Green) */}
-        <button 
-          style={styles.testButton} 
-          onClick={testOpenExternal}
-          title="Test if opening in default browser works"
-        >
-          🧪 Test: Open Google in Browser
-        </button>
-        
         <p style={styles.info}>
           You'll be redirected to Roblox to authorize.
-        </p>
-        <p style={styles.testInfo}>
-          <small>Use the green test button first to verify external browser functionality</small>
         </p>
       </div>
     </div>
@@ -97,34 +64,12 @@ const styles: { [key: string]: React.CSSProperties } = {
     cursor: 'pointer',
     fontWeight: 'bold',
     transition: 'transform 0.2s',
-    marginBottom: '15px', // Added spacing for test button
     width: '100%',
-  },
-  // NEW: Test button style
-  testButton: {
-    background: '#2ecc71',
-    color: 'white',
-    border: 'none',
-    padding: '10px 20px',
-    fontSize: '14px',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    transition: 'transform 0.2s',
-    width: '100%',
-    marginBottom: '15px',
   },
   info: {
     marginTop: '20px',
     fontSize: '12px',
     color: '#999',
-  },
-  // NEW: Test info style
-  testInfo: {
-    marginTop: '10px',
-    fontSize: '11px',
-    color: '#666',
-    fontStyle: 'italic',
   },
 };
 

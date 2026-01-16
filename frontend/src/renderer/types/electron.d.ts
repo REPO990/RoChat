@@ -8,7 +8,8 @@ declare global {
       minimize: () => void;
       close: () => void;
       resizeTo: (width: number, height: number) => void;
-      openExternal: (url: string) => void; // Add this line
+      openExternal: (url: string) => void;
+      onOAuthCallback: (callback: (tokens: { accessToken: string; refreshToken: string }) => void) => void;
     };
   }
 }

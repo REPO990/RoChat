@@ -9,17 +9,18 @@ const JWT_SECRET = process.env.JWT_SECRET!;
 
 export const AuthController = {
   // Redirect to Roblox OAuth
- async login(req: AuthRequest, res: Response) {
-  console.log('Login endpoint called'); // Check your backend terminal for this log
-  try {
-    const authUrl = RobloxService.getAuthUrl();
-    console.log('Redirecting to:', authUrl); // Check this log too
-    res.redirect(authUrl);
-  } catch (error) {
-    console.error('Login controller error:', error);
-    res.status(500).send('Auth failed');
-  }
-},
+  async login(req: AuthRequest, res: Response) {
+    console.log('Login endpoint called'); // Check your backend terminal for this log
+    try {
+      const authUrl = RobloxService.getAuthUrl();
+      console.log('Redirecting to:', authUrl); // Check this log too
+      res.redirect(authUrl);
+    } catch (error) {
+      console.error('Login controller error:', error);
+      res.status(500).send('Auth failed');
+    }
+  },
+  
   // Handle OAuth callback
   async callback(req: AuthRequest, res: Response) {
     try {
@@ -80,8 +81,17 @@ export const AuthController = {
 
       await logToDatabase(user.id, 'info', 'User logged in', { username });
 
-      // Redirect to frontend with tokens
-      res.redirect(`http://localhost:3000?accessToken=${accessToken}&refreshToken=${refreshToken}`);
+      // FIXED: Use environment variable for redirect URL
+      res.send(`
+  <html>
+    <body>
+      <script>
+        // Pass tokens back to Electron app
+        window.location.href = 'robloxchat://auth?accessToken=${accessToken}&refreshToken=${refreshToken}';
+      </script>
+    </body>
+  </html>
+`);
 
     } catch (error: any) {
       console.error('OAuth callback error:', error);

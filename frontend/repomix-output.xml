@@ -1,0 +1,1498 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+package.json
+src/main/main.ts
+src/main/preload.ts
+src/public/index.html
+src/renderer/App.tsx
+src/renderer/components/Auth/LoginScreen.tsx
+src/renderer/components/Chat/ChatWindow.tsx
+src/renderer/components/Chat/MessageInput.tsx
+src/renderer/components/Chat/MessageList.tsx
+src/renderer/components/Settings/SettingsPanel.tsx
+src/renderer/hooks/useChat.ts
+src/renderer/hooks/useGameDetection.ts
+src/renderer/index.tsx
+src/renderer/services/roblox.service.ts
+src/renderer/services/socket.service.ts
+src/renderer/styles/App.css
+src/renderer/types/electron.d.ts
+src/renderer/types/index.ts
+tsconfig.json
+tsconfig.main.json
+webpack.config.js
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="package.json">
+{
+  "name": "roblox-chat-overlay",
+  "version": "1.0.0",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "webpack serve --mode development",
+    "build": "webpack --mode production",
+    "electron": "electron .",
+    "start": "npm run build && npm run electron"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "buffer": "^6.0.3",
+    "electron": "^28.0.0",
+    "events": "^3.3.0",
+    "process": "^0.11.10",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "socket.io-client": "^4.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "css-loader": "^6.8.1",
+    "electron-builder": "^24.6.4",
+    "html-webpack-plugin": "^5.5.3",
+    "style-loader": "^3.3.3",
+    "ts-loader": "^9.4.4",
+    "typescript": "^5.0.0",
+    "webpack": "^5.88.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
+  }
+}
+</file>
+
+<file path="src/main/main.ts">
+import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
+import * as path from 'path';
+
+let mainWindow: BrowserWindow | null = null;
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 350,  // Smaller width
+    height: 550, // Smaller height
+    frame: false,  // No frame
+    transparent: true,
+    alwaysOnTop: false,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  mainWindow.loadURL('http://localhost:3000');
+  // Remove this line to hide DevTools by default:
+  // mainWindow.webContents.openDevTools();
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+app.whenReady().then(() => {
+  createWindow();
+
+  globalShortcut.register('CommandOrControl+Shift+C', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
+        mainWindow.show();
+      }
+    }
+  });
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
+// IPC handlers
+ipcMain.on('set-always-on-top', (event, flag: boolean) => {
+  if (mainWindow) {
+    mainWindow.setAlwaysOnTop(flag);
+  }
+});
+
+ipcMain.on('set-opacity', (event, opacity: number) => {
+  if (mainWindow) {
+    mainWindow.setOpacity(opacity);
+  }
+});
+
+ipcMain.on('minimize', () => {
+  if (mainWindow) {
+    mainWindow.minimize();
+  }
+});
+
+ipcMain.on('close', () => {
+  if (mainWindow) {
+    mainWindow.close();
+  }
+});
+ipcMain.on('resize-to', (event, width: number, height: number) => {
+  if (mainWindow) {
+    mainWindow.setSize(width, height);
+  }
+});
+</file>
+
+<file path="src/main/preload.ts">
+import { contextBridge, ipcRenderer } from 'electron';
+
+// Expose protected methods to renderer
+contextBridge.exposeInMainWorld('electron', {
+  setAlwaysOnTop: (flag: boolean) => ipcRenderer.send('set-always-on-top', flag),
+  setOpacity: (opacity: number) => ipcRenderer.send('set-opacity', opacity),
+  minimize: () => ipcRenderer.send('minimize'),
+  close: () => ipcRenderer.send('close'),
+  resizeTo: (width: number, height: number) => ipcRenderer.send('resize-to', width, height),
+});
+</file>
+
+<file path="src/public/index.html">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roblox Chat Overlay</title>
+  <script>
+    // Polyfill for global
+    if (typeof global === 'undefined') {
+      window.global = window;
+    }
+  </script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: transparent;
+      overflow: hidden;
+    }
+    #root {
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>
+</file>
+
+<file path="src/renderer/App.tsx">
+import React, { useState, useEffect } from 'react';
+import LoginScreen from './components/Auth/LoginScreen';
+import ChatWindow from './components/Chat/ChatWindow';
+import SettingsPanel from './components/Settings/SettingsPanel';
+import { useGameDetection } from './hooks/useGameDetection';
+import { useChat } from './hooks/useChat';
+import { RobloxService } from './services/roblox.service';
+import { Settings, User } from './types/index';
+import './styles/App.css';
+
+const App: React.FC = () => {
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<Settings>({
+    position: 'bottom-right',
+    alwaysOnTop: false,
+    opacity: 0.9,
+    keybind: 'Ctrl+Shift+C',
+    isDraggable: true,
+  });
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+
+    if (tokenFromUrl) {
+      setToken(tokenFromUrl);
+      localStorage.setItem('roblox_chat_token', tokenFromUrl);
+      window.history.replaceState({}, document.title, '/');
+    } else {
+      const savedToken = localStorage.getItem('roblox_chat_token');
+      if (savedToken) {
+        setToken(savedToken);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const verifyToken = async () => {
+      if (!token) return;
+
+      const userData = await RobloxService.verifyToken(token);
+      if (userData) {
+        setUser(userData);
+      } else {
+        setToken(null);
+        localStorage.removeItem('roblox_chat_token');
+      }
+    };
+
+    verifyToken();
+  }, [token]);
+
+  const { presence, currentRoom } = useGameDetection(token);
+  const { messages, sendMessage } = useChat(currentRoom, token);
+
+  useEffect(() => {
+    if (window.electron) {
+      window.electron.setAlwaysOnTop(settings.alwaysOnTop);
+      window.electron.setOpacity(settings.opacity);
+    }
+  }, [settings.alwaysOnTop, settings.opacity]);
+
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+        setIsMinimized(!isMinimized);
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        setShowSettings(!showSettings);
+      }
+    };
+  useEffect(() => {
+  if (window.electron) {
+    if (isMinimized) {
+      // Small window when minimized
+      window.resizeTo(340, 65);
+    } else {
+      // Normal window when expanded
+      window.resizeTo(350, 550);
+    }
+  }
+}, [isMinimized]);
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [isMinimized, showSettings]);
+
+  if (!token || !user) {
+    return <LoginScreen />;
+  }
+
+  return (
+    <div className="app">
+      <ChatWindow
+        messages={messages}
+        onSendMessage={sendMessage}
+        currentRoom={currentRoom}
+        isMinimized={isMinimized}
+        onToggleMinimize={() => setIsMinimized(!isMinimized)}
+        position={settings.position}
+        opacity={settings.opacity}
+      />
+
+      {/* Only show these when NOT minimized */}
+      {!isMinimized && (
+        <>
+          <button onClick={() => setShowSettings(true)} style={styles.settingsButton}>
+            ⚙️
+          </button>
+
+          <div style={styles.userInfo}>
+            <img src={user.avatarUrl} alt={user.username} style={styles.avatar} />
+            <span style={styles.username}>{user.username}</span>
+            {presence.isOnline && <span style={styles.onlineIndicator}>🟢</span>}
+          </div>
+        </>
+      )}
+
+      {showSettings && (
+        <SettingsPanel
+          settings={settings}
+          onSettingsChange={setSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+const styles: { [key: string]: React.CSSProperties } = {
+  settingsButton: {
+    position: 'fixed',
+    top: '20px',
+    right: '20px',
+    background: 'rgba(52, 152, 219, 0.8)',
+    border: 'none',
+    color: 'white',
+    width: '50px',
+    height: '50px',
+    borderRadius: '50%',
+    fontSize: '24px',
+    cursor: 'pointer',
+    boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)',
+    zIndex: 999,
+  },
+  userInfo: {
+    position: 'fixed',
+    top: '20px',
+    left: '20px',
+    background: 'rgba(0, 0, 0, 0.7)',
+    padding: '10px 15px',
+    borderRadius: '25px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    backdropFilter: 'blur(10px)',
+    zIndex: 999,
+  },
+  avatar: {
+    width: '30px',
+    height: '30px',
+    borderRadius: '50%',
+    border: '2px solid white',
+  },
+  username: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: '14px',
+  },
+  onlineIndicator: {
+    fontSize: '12px',
+  },
+};
+
+export default App;
+</file>
+
+<file path="src/renderer/components/Auth/LoginScreen.tsx">
+import React from 'react';
+import { RobloxService } from '../../services/roblox.service';
+
+const LoginScreen: React.FC = () => {
+  const handleLogin = () => {
+    const authUrl = RobloxService.getAuthUrl();
+    // Change from window.open to window.location
+    window.location.href = authUrl;
+  };
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.card}>
+        <h1 style={styles.title}>🎮 Roblox Chat Overlay</h1>
+        <p style={styles.subtitle}>Connect with players across servers!</p>
+        <button style={styles.button} onClick={handleLogin}>
+          🔐 Login with Roblox
+        </button>
+        <p style={styles.info}>
+          You'll be redirected to Roblox to authorize.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const styles: { [key: string]: React.CSSProperties } = {
+  container: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100vh',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+  },
+  card: {
+    background: 'rgba(255, 255, 255, 0.95)',
+    padding: '40px',
+    borderRadius: '20px',
+    textAlign: 'center',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    maxWidth: '400px',
+  },
+  title: {
+    fontSize: '32px',
+    marginBottom: '10px',
+    color: '#333',
+  },
+  subtitle: {
+    fontSize: '16px',
+    color: '#666',
+    marginBottom: '30px',
+  },
+  button: {
+    background: '#e74c3c',
+    color: 'white',
+    border: 'none',
+    padding: '15px 40px',
+    fontSize: '18px',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    transition: 'transform 0.2s',
+  },
+  info: {
+    marginTop: '20px',
+    fontSize: '12px',
+    color: '#999',
+  },
+};
+
+export default LoginScreen;
+</file>
+
+<file path="src/renderer/components/Chat/ChatWindow.tsx">
+import React from 'react';
+import MessageList from './MessageList';
+import MessageInput from './MessageInput';
+import { Message } from '../../types/index';
+
+interface ChatWindowProps {
+  messages: Message[];
+  onSendMessage: (message: string) => void;
+  currentRoom: string | null;
+  isMinimized: boolean;
+  onToggleMinimize: () => void;
+  position: string;
+  opacity: number;
+}
+
+const ChatWindow: React.FC<ChatWindowProps> = ({
+  messages,
+  onSendMessage,
+  currentRoom,
+  isMinimized,
+  onToggleMinimize,
+  position,
+  opacity,
+}) => {
+  const handleClose = () => {
+    if (window.electron) {
+      window.electron.close();
+    } else {
+      window.close();
+    }
+  };
+
+  const getRoomName = () => {
+    if (!currentRoom) return 'Not in game';
+    
+    if (currentRoom.startsWith('global:')) {
+      const placeId = currentRoom.split(':')[1];
+      return `🌍 Global Chat - Game ${placeId}`;
+    } else if (currentRoom.startsWith('server:')) {
+      const [, placeId] = currentRoom.split(':');
+      return `🖥️ Server Chat - Game ${placeId}`;
+    }
+    
+    return 'Chat';
+  };
+
+  const getPositionStyles = (): React.CSSProperties => {
+    const baseStyles: React.CSSProperties = {
+      position: 'fixed',
+      width: '320px',
+      opacity,
+    };
+
+    // When minimized, always snap to bottom
+    if (isMinimized) {
+      switch (position) {
+        case 'top-left':
+        case 'bottom-left':
+          return { ...baseStyles, bottom: '10px', left: '10px', height: '45px' };
+        case 'top-right':
+        case 'bottom-right':
+        default:
+          return { ...baseStyles, bottom: '10px', right: '10px', height: '45px' };
+      }
+    }
+
+    // When expanded
+    const expandedHeight = '450px';
+    switch (position) {
+      case 'top-left':
+        return { ...baseStyles, top: '10px', left: '10px', height: expandedHeight };
+      case 'top-right':
+        return { ...baseStyles, top: '10px', right: '10px', height: expandedHeight };
+      case 'bottom-left':
+        return { ...baseStyles, bottom: '10px', left: '10px', height: expandedHeight };
+      case 'bottom-right':
+        return { ...baseStyles, bottom: '10px', right: '10px', height: expandedHeight };
+      case 'roblox-style':
+        return { ...baseStyles, bottom: '10px', left: '10px', width: '350px', height: '280px' };
+      default:
+        return { ...baseStyles, bottom: '10px', right: '10px', height: expandedHeight };
+    }
+  };
+
+  return (
+    <div style={{ ...styles.container, ...getPositionStyles() }}>
+      <div style={styles.header} className="draggable-header">
+        <span style={styles.title}>{getRoomName()}</span>
+        <div style={styles.controls}>
+          <button onClick={onToggleMinimize} style={styles.controlButton}>
+            {isMinimized ? '▲' : '▼'}
+          </button>
+          <button onClick={handleClose} style={styles.closeButton}>
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {!isMinimized && (
+        <>
+          <MessageList messages={messages} />
+          <MessageInput onSendMessage={onSendMessage} disabled={!currentRoom} />
+        </>
+      )}
+    </div>
+  );
+};
+
+const styles: { [key: string]: React.CSSProperties } = {
+  container: {
+    background: 'rgba(0, 0, 0, 0.8)',
+    backdropFilter: 'blur(15px)',
+    borderRadius: '15px',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+  },
+  header: {
+    background: 'rgba(52, 152, 219, 0.3)',
+    padding: '12px 15px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    cursor: 'move',
+    userSelect: 'none',
+  },
+  title: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: '14px',
+  },
+  controls: {
+    display: 'flex',
+    gap: '8px',
+  },
+  controlButton: {
+    background: 'rgba(255, 255, 255, 0.2)',
+    border: 'none',
+    color: 'white',
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    fontSize: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButton: {
+    background: 'rgba(231, 76, 60, 0.8)',
+    border: 'none',
+    color: 'white',
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    fontSize: '14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 'bold',
+  },
+};
+
+export default ChatWindow;
+</file>
+
+<file path="src/renderer/components/Chat/MessageInput.tsx">
+import React, { useState, KeyboardEvent } from 'react';
+
+interface MessageInputProps {
+  onSendMessage: (message: string) => void;
+  disabled: boolean;
+}
+
+const MessageInput: React.FC<MessageInputProps> = ({ onSendMessage, disabled }) => {
+  const [message, setMessage] = useState('');
+
+  const handleSend = () => {
+    if (message.trim() && !disabled) {
+      onSendMessage(message);
+      setMessage('');
+    }
+  };
+
+  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  return (
+    <div style={styles.container}>
+      <input
+        type="text"
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        onKeyPress={handleKeyPress}
+        placeholder={disabled ? 'Join a game to chat...' : 'Type a message...'}
+        disabled={disabled}
+        style={styles.input}
+      />
+      <button onClick={handleSend} disabled={disabled} style={styles.button}>
+        ➤
+      </button>
+    </div>
+  );
+};
+
+const styles: { [key: string]: React.CSSProperties } = {
+  container: {
+    display: 'flex',
+    gap: '8px',
+    padding: '10px',
+    background: 'rgba(0, 0, 0, 0.3)',
+    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+  },
+  input: {
+    flex: 1,
+    padding: '10px 15px',
+    background: 'rgba(255, 255, 255, 0.9)',
+    border: 'none',
+    borderRadius: '20px',
+    fontSize: '14px',
+    outline: 'none',
+  },
+  button: {
+    padding: '10px 20px',
+    background: '#3498db',
+    color: 'white',
+    border: 'none',
+    borderRadius: '20px',
+    cursor: 'pointer',
+    fontSize: '16px',
+    fontWeight: 'bold',
+    transition: 'background 0.2s',
+  },
+};
+
+export default MessageInput;
+</file>
+
+<file path="src/renderer/components/Chat/MessageList.tsx">
+import React, { useEffect, useRef } from 'react';
+import { Message } from '../../types/index';
+
+interface MessageListProps {
+  messages: Message[];
+}
+
+const MessageList: React.FC<MessageListProps> = ({ messages }) => {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  return (
+    <div style={styles.container}>
+      {messages.length === 0 ? (
+        <div style={styles.empty}>No messages yet. Be the first to say hi! 👋</div>
+      ) : (
+        messages.map((msg) => (
+          <div key={msg.id} style={styles.message}>
+            <img
+              src={msg.avatar_url || 'https://via.placeholder.com/40'}
+              alt={msg.username}
+              style={styles.avatar}
+            />
+            <div style={styles.messageContent}>
+              <div style={styles.header}>
+                <span style={styles.username}>{msg.username}</span>
+                <span style={styles.time}>{formatTime(msg.created_at)}</span>
+              </div>
+              <div style={styles.text}>{msg.message}</div>
+            </div>
+          </div>
+        ))
+      )}
+      <div ref={messagesEndRef} />
+    </div>
+  );
+};
+
+const styles: { [key: string]: React.CSSProperties } = {
+  container: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '15px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  empty: {
+    textAlign: 'center',
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: '50px',
+    fontSize: '14px',
+  },
+  message: {
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'flex-start',
+  },
+  avatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    border: '2px solid rgba(255, 255, 255, 0.3)',
+  },
+  messageContent: {
+    flex: 1,
+    background: 'rgba(255, 255, 255, 0.1)',
+    padding: '10px 15px',
+    borderRadius: '12px',
+    backdropFilter: 'blur(10px)',
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '5px',
+  },
+  username: {
+    fontWeight: 'bold',
+    color: '#3498db',
+    fontSize: '14px',
+  },
+  time: {
+    fontSize: '11px',
+    color: 'rgba(255, 255, 255, 0.5)',
+  },
+  text: {
+    color: 'white',
+    fontSize: '14px',
+    wordWrap: 'break-word',
+  },
+};
+
+export default MessageList;
+</file>
+
+<file path="src/renderer/components/Settings/SettingsPanel.tsx">
+import React from 'react';
+import { Settings } from '../../types/index';
+
+interface SettingsPanelProps {
+  settings: Settings;
+  onSettingsChange: (settings: Settings) => void;
+  onClose: () => void;
+}
+
+const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  settings,
+  onSettingsChange,
+  onClose,
+}) => {
+  const handleChange = (key: keyof Settings, value: any) => {
+    onSettingsChange({ ...settings, [key]: value });
+  };
+
+  return (
+    <div style={styles.overlay}>
+      <div style={styles.panel}>
+        <div style={styles.header}>
+          <h2 style={styles.title}>⚙️ Settings</h2>
+          <button onClick={onClose} style={styles.closeButton}>
+            ✕
+          </button>
+        </div>
+
+        <div style={styles.content}>
+          <div style={styles.setting}>
+            <label style={styles.label}>Position</label>
+            <select
+              value={settings.position}
+              onChange={(e) => handleChange('position', e.target.value)}
+              style={styles.select}
+            >
+              <option value="top-left">Top Left</option>
+              <option value="top-right">Top Right</option>
+              <option value="bottom-left">Bottom Left</option>
+              <option value="bottom-right">Bottom Right</option>
+              <option value="roblox-style">Roblox Style</option>
+            </select>
+          </div>
+
+          <div style={styles.setting}>
+            <label style={styles.label}>Opacity: {Math.round(settings.opacity * 100)}%</label>
+            <input
+              type="range"
+              min="0.3"
+              max="1"
+              step="0.1"
+              value={settings.opacity}
+              onChange={(e) => handleChange('opacity', parseFloat(e.target.value))}
+              style={styles.slider}
+            />
+          </div>
+
+          <div style={styles.setting}>
+            <label style={styles.label}>
+              <input
+                type="checkbox"
+                checked={settings.alwaysOnTop}
+                onChange={(e) => handleChange('alwaysOnTop', e.target.checked)}
+                style={styles.checkbox}
+              />
+              Always on Top
+            </label>
+          </div>
+
+          <div style={styles.setting}>
+            <label style={styles.label}>
+              <input
+                type="checkbox"
+                checked={settings.isDraggable}
+                onChange={(e) => handleChange('isDraggable', e.target.checked)}
+                style={styles.checkbox}
+              />
+              Draggable Window
+            </label>
+          </div>
+
+          <div style={styles.setting}>
+            <label style={styles.label}>Chat Keybind</label>
+            <input
+              type="text"
+              value={settings.keybind}
+              onChange={(e) => handleChange('keybind', e.target.value)}
+              placeholder="e.g., Ctrl+Shift+C"
+              style={styles.input}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const styles: { [key: string]: React.CSSProperties } = {
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.7)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  panel: {
+    background: 'white',
+    borderRadius: '15px',
+    width: '400px',
+    maxHeight: '80vh',
+    overflow: 'auto',
+  },
+  header: {
+    padding: '20px',
+    borderBottom: '1px solid #eee',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  title: {
+    margin: 0,
+    fontSize: '24px',
+    color: '#333',
+  },
+  closeButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: '24px',
+    cursor: 'pointer',
+    color: '#999',
+  },
+  content: {
+    padding: '20px',
+  },
+  setting: {
+    marginBottom: '20px',
+  },
+  label: {
+    display: 'block',
+    marginBottom: '8px',
+    fontWeight: 'bold',
+    color: '#333',
+    fontSize: '14px',
+  },
+  select: {
+    width: '100%',
+    padding: '10px',
+    borderRadius: '8px',
+    border: '1px solid #ddd',
+    fontSize: '14px',
+  },
+  slider: {
+    width: '100%',
+  },
+  checkbox: {
+    marginRight: '10px',
+  },
+  input: {
+    width: '100%',
+    padding: '10px',
+    borderRadius: '8px',
+    border: '1px solid #ddd',
+    fontSize: '14px',
+  },
+};
+
+export default SettingsPanel;
+</file>
+
+<file path="src/renderer/hooks/useChat.ts">
+import { useState, useEffect } from 'react';
+import socketService from '../services/socket.service';
+import { Message } from '../types/index';
+
+export const useChat = (roomId: string | null, token: string | null) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+
+    // Connect socket
+    socketService.connect(token);
+    setIsConnected(true);
+
+    // Setup listeners
+    socketService.onRoomHistory((msgs) => {
+      setMessages(msgs);
+    });
+
+    socketService.onNewMessage((msg) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+
+    socketService.onUserJoined((data) => {
+      console.log(`${data.username} joined the chat`);
+    });
+
+    socketService.onUserLeft((data) => {
+      console.log(`${data.username} left the chat`);
+    });
+
+    return () => {
+      socketService.disconnect();
+      setIsConnected(false);
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (!roomId || !isConnected) {
+      setMessages([]);
+      return;
+    }
+
+    // Join new room
+    socketService.joinRoom(roomId);
+
+    return () => {
+      if (roomId) {
+        socketService.leaveRoom(roomId);
+      }
+    };
+  }, [roomId, isConnected]);
+
+  const sendMessage = (message: string) => {
+    if (roomId && message.trim()) {
+      socketService.sendMessage(roomId, message);
+    }
+  };
+
+  return { messages, sendMessage, isConnected };
+};
+</file>
+
+<file path="src/renderer/hooks/useGameDetection.ts">
+import { useState, useEffect, useCallback } from 'react';
+import { RobloxService } from '../services/roblox.service';
+import { GamePresence } from '../types/index';
+
+export const useGameDetection = (token: string | null) => {
+  const [presence, setPresence] = useState<GamePresence>({
+    placeId: null,
+    jobId: null,
+    isOnline: false,
+  });
+  const [currentRoom, setCurrentRoom] = useState<string | null>(null);
+
+  const detectGame = useCallback(async () => {
+    if (!token) return;
+
+    try {
+      const newPresence = await RobloxService.getUserPresence(token);
+      setPresence(newPresence);
+
+      // Determine room ID
+      if (newPresence.placeId) {
+        let roomId: string;
+        if (newPresence.jobId) {
+          // Server-specific chat
+          roomId = `server:${newPresence.placeId}:${newPresence.jobId}`;
+        } else {
+          // Global game chat
+          roomId = `global:${newPresence.placeId}`;
+        }
+        setCurrentRoom(roomId);
+      } else {
+        setCurrentRoom(null);
+      }
+    } catch (error) {
+      console.error('Game detection error:', error);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    // Initial detection
+    detectGame();
+
+    // Poll every 5 seconds
+    const interval = setInterval(detectGame, 5000);
+
+    return () => clearInterval(interval);
+  }, [token, detectGame]);
+
+  return { presence, currentRoom };
+};
+</file>
+
+<file path="src/renderer/index.tsx">
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement
+);
+
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+</file>
+
+<file path="src/renderer/services/roblox.service.ts">
+import axios from 'axios';
+import { User, GamePresence } from '../types/index';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+
+export const RobloxService = {
+  async verifyToken(token: string): Promise<User | null> {
+    try {
+      const response = await axios.post(`${API_URL}/auth/verify`, { token });
+      return response.data.user;
+    } catch (error) {
+      console.error('Token verification failed:', error);
+      return null;
+    }
+  },
+
+  async getUserPresence(token: string): Promise<GamePresence> {
+    try {
+      const response = await axios.get(`${API_URL}/auth/presence`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get user presence:', error);
+      return { placeId: null, jobId: null, isOnline: false };
+    }
+  },
+
+  async getChatHistory(token: string, roomId: string) {
+    try {
+      const response = await axios.get(`${API_URL}/chat/history/${roomId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return response.data.messages;
+    } catch (error) {
+      console.error('Failed to get chat history:', error);
+      return [];
+    }
+  },
+
+  getAuthUrl(): string {
+    return `${API_URL}/auth/roblox`;
+  },
+};
+</file>
+
+<file path="src/renderer/services/socket.service.ts">
+import { io, Socket } from 'socket.io-client';
+import { Message } from '../types/index';
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:3001';
+
+class SocketService {
+  private socket: Socket | null = null;
+  private token: string | null = null;
+
+  connect(token: string) {
+    this.token = token;
+
+    this.socket = io(SOCKET_URL, {
+      auth: { token },
+      transports: ['websocket'],
+    });
+
+    this.socket.on('connect', () => {
+      console.log('✅ Connected to socket server');
+    });
+
+    this.socket.on('disconnect', () => {
+      console.log('❌ Disconnected from socket server');
+    });
+
+    this.socket.on('error', (error: any) => {
+      console.error('Socket error:', error);
+    });
+  }
+
+  disconnect() {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+  }
+
+  joinRoom(roomId: string) {
+    if (this.socket) {
+      this.socket.emit('join-room', roomId);
+    }
+  }
+
+  leaveRoom(roomId: string) {
+    if (this.socket) {
+      this.socket.emit('leave-room', roomId);
+    }
+  }
+
+  sendMessage(roomId: string, message: string) {
+    if (this.socket) {
+      this.socket.emit('send-message', { roomId, message });
+    }
+  }
+
+  onRoomHistory(callback: (messages: Message[]) => void) {
+    if (this.socket) {
+      this.socket.on('room-history', callback);
+    }
+  }
+
+  onNewMessage(callback: (message: Message) => void) {
+    if (this.socket) {
+      this.socket.on('new-message', callback);
+    }
+  }
+
+  onUserJoined(callback: (data: { username: string; avatarUrl: string }) => void) {
+    if (this.socket) {
+      this.socket.on('user-joined', callback);
+    }
+  }
+
+  onUserLeft(callback: (data: { username: string }) => void) {
+    if (this.socket) {
+      this.socket.on('user-left', callback);
+    }
+  }
+
+  removeAllListeners() {
+    if (this.socket) {
+      this.socket.removeAllListeners();
+    }
+  }
+}
+
+export default new SocketService();
+</file>
+
+<file path="src/renderer/styles/App.css">
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: transparent; /* Fully transparent */
+  overflow: hidden;
+}
+
+.app {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  background: transparent; /* Fully transparent */
+}
+
+button {
+  -webkit-app-region: no-drag;
+}
+
+input,
+textarea,
+select {
+  -webkit-app-region: no-drag;
+}
+
+.draggable-header {
+  -webkit-app-region: drag;
+}
+
+.draggable-header * {
+  -webkit-app-region: no-drag;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+</file>
+
+<file path="src/renderer/types/electron.d.ts">
+export {};
+
+declare global {
+  interface Window {
+    electron?: {
+      setAlwaysOnTop: (flag: boolean) => void;
+      setOpacity: (opacity: number) => void;
+      minimize: () => void;
+      close: () => void;
+      resizeTo: (width: number, height: number) => void;
+    };
+  }
+}
+</file>
+
+<file path="src/renderer/types/index.ts">
+export interface User {
+  id: number;
+  robloxId: number;
+  username: string;
+  avatarUrl: string;
+}
+
+export interface Message {
+  id: number;
+  room_id: string;
+  user_id: number;
+  username: string;
+  avatar_url: string;
+  message: string;
+  created_at: string;
+}
+
+export interface GamePresence {
+  placeId: number | null;
+  jobId: string | null;
+  isOnline: boolean;
+}
+
+export interface Settings {
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'roblox-style';
+  alwaysOnTop: boolean;
+  opacity: number;
+  keybind: string;
+  isDraggable: boolean;
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020", "DOM"],
+    "jsx": "react",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
+</file>
+
+<file path="tsconfig.main.json">
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "outDir": "./dist/main",
+    "rootDir": "./src/main",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node"
+  },
+  "include": ["src/main/**/*"]
+}
+</file>
+
+<file path="webpack.config.js">
+const path = require('path');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+const webpack = require('webpack');
+
+module.exports = {
+  mode: 'development',
+  entry: './src/renderer/index.tsx',
+  target: 'electron-renderer',
+  devtool: false,
+  output: {
+    path: path.resolve(__dirname, 'dist/renderer'),
+    filename: 'bundle.js'
+  },
+  resolve: {
+    extensions: ['.ts', '.tsx', '.js', '.jsx']
+  },
+  module: {
+    rules: [
+      {
+        test: /\.tsx?$/,
+        use: 'ts-loader',
+        exclude: /node_modules/
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader']
+      }
+    ]
+  },
+  plugins: [
+    new HtmlWebpackPlugin({
+      template: './src/public/index.html'
+    }),
+    new webpack.DefinePlugin({
+      'process.env.REACT_APP_API_URL': JSON.stringify('http://localhost:3001'),
+      'process.env.REACT_APP_SOCKET_URL': JSON.stringify('http://localhost:3001')
+    })
+  ],
+  devServer: {
+    static: {
+      directory: path.join(__dirname, 'dist/renderer'),
+    },
+    port: 3000,
+    hot: false,
+    liveReload: false,
+    client: false,
+    webSocketServer: false
+  }
+};
+</file>
+
+</files>
